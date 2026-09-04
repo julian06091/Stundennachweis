@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stundennachweis Test</title>
+<style>
+body{margin:0;background:#f2f2f7;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+main{max-width:520px;margin:auto;padding:24px 16px}
+h1{font-size:30px}
+.card{background:white;border-radius:18px;padding:18px;margin:14px 0}
+label{display:block;font-size:13px;font-weight:600;color:#666;margin:12px 0 6px}
+input{width:100%;box-sizing:border-box;padding:14px;border:1px solid #ccc;border-radius:12px;font-size:17px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{width:100%;padding:15px;border:0;border-radius:12px;background:#007aff;color:white;font-size:17px;font-weight:600;margin-top:15px}
+.entry{padding:12px 0;border-bottom:1px solid #eee}
+#message{margin-top:12px;padding:12px;border-radius:10px;background:#e8f5e9;display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Stundennachweis</h1>
+<p>Testversion – erstmal nur Eingaben.</p>
+
+<div class="card">
+<label>Datum</label>
+<input id="date" type="date">
+
+<div class="row">
+<div><label>Von</label><input id="from" type="time"></div>
+<div><label>Bis</label><input id="to" type="time"></div>
+</div>
+
+<label>Tätigkeit</label>
+<input id="activity" placeholder="z. B. Lagerarbeiten">
+
+<button id="add">Eintrag hinzufügen</button>
+<div id="message"></div>
+</div>
+
+<div class="card">
+<h3>Meine Einträge</h3>
+<div id="entries">Noch keine Einträge.</div>
+</div>
+</main>
+
+<script>
+const entries=[];
+const date=document.getElementById("date");
+const from=document.getElementById("from");
+const to=document.getElementById("to");
+const activity=document.getElementById("activity");
+const list=document.getElementById("entries");
+const msg=document.getElementById("message");
+
+document.getElementById("add").addEventListener("click",function(){
+ if(!date.value||!from.value||!to.value||!activity.value.trim()){
+   alert("Bitte Datum, Von, Bis und Tätigkeit ausfüllen.");
+   return;
+ }
+ if(to.value<=from.value){
+   alert("Die Bis-Zeit muss nach der Von-Zeit liegen.");
+   return;
+ }
+ entries.push({
+   date:date.value,
+   from:from.value,
+   to:to.value,
+   activity:activity.value.trim()
+ });
+ render();
+ activity.value="";
+ msg.textContent="✓ Eintrag wurde hinzugefügt";
+ msg.style.display="block";
+});
+
+function render(){
+ list.innerHTML=entries.map(e =>
+   "<div class='entry'><b>"+e.date.split("-").reverse().join(".")+
+   "</b> · "+e.from+"–"+e.to+" Uhr<br>"+e.activity+"</div>"
+ ).join("");
+}
+</script>
+</body>
+</html>
