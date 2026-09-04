@@ -3,24 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Stundennachweis Test</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#007aff">
+<title>Stundennachweis</title>
 <style>
-body{margin:0;background:#f2f2f7;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
-main{max-width:520px;margin:auto;padding:24px 16px}
-h1{font-size:30px}
-.card{background:white;border-radius:18px;padding:18px;margin:14px 0}
-label{display:block;font-size:13px;font-weight:600;color:#666;margin:12px 0 6px}
-input{width:100%;box-sizing:border-box;padding:14px;border:1px solid #ccc;border-radius:12px;font-size:17px}
+*{box-sizing:border-box}
+body{margin:0;background:#f2f2f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:600px;margin:auto;padding:20px 16px 40px}
+h1{font-size:29px;margin:5px 0 2px}.period{color:#007aff;font-weight:600;font-size:17px;margin-bottom:20px}
+.card{background:#fff;border-radius:18px;padding:18px;margin:12px 0;box-shadow:0 1px 5px #00000012}
+label{display:block;font-size:13px;font-weight:600;color:#666;margin:10px 0 6px}
+input{width:100%;padding:13px;border:1px solid #d1d1d6;border-radius:11px;font-size:17px;background:#fff}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-button{width:100%;padding:15px;border:0;border-radius:12px;background:#007aff;color:white;font-size:17px;font-weight:600;margin-top:15px}
-.entry{padding:12px 0;border-bottom:1px solid #eee}
-#message{margin-top:12px;padding:12px;border-radius:10px;background:#e8f5e9;display:none}
+button{width:100%;border:0;border-radius:12px;padding:14px;font-size:17px;font-weight:600;margin-top:14px;background:#007aff;color:#fff}
+button.gray{background:#e5e5ea;color:#111}
+button.red{width:auto;background:#ff3b30;padding:7px 10px;font-size:13px;margin:0}
+.entry{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #eee}
+.entry:last-child{border-bottom:0}
+.small{color:#666;font-size:14px}
+.total{font-size:18px;font-weight:700;margin-top:14px}
+.empty{color:#888;text-align:center;padding:12px}
 </style>
 </head>
 <body>
 <main>
 <h1>Stundennachweis</h1>
-<p>Testversion – erstmal nur Eingaben.</p>
+<div class="period" id="period">September 2026 · KW 36</div>
 
 <div class="card">
 <label>Datum</label>
@@ -34,52 +43,65 @@ button{width:100%;padding:15px;border:0;border-radius:12px;background:#007aff;co
 <label>Tätigkeit</label>
 <input id="activity" placeholder="z. B. Lagerarbeiten">
 
-<button id="add">Eintrag hinzufügen</button>
-<div id="message"></div>
+<button id="add">+ Eintrag hinzufügen</button>
 </div>
 
 <div class="card">
-<h3>Meine Einträge</h3>
-<div id="entries">Noch keine Einträge.</div>
+<h3 style="margin-top:0">Meine Einträge</h3>
+<div id="entries"></div>
+<div class="total" id="total">Gesamt: 0:00 h</div>
+<button class="gray" id="clear">Liste leeren</button>
 </div>
 </main>
 
 <script>
-const entries=[];
-const date=document.getElementById("date");
-const from=document.getElementById("from");
-const to=document.getElementById("to");
-const activity=document.getElementById("activity");
-const list=document.getElementById("entries");
-const msg=document.getElementById("message");
+const $=id=>document.getElementById(id);
+let entries=JSON.parse(localStorage.getItem("stunden_entries")||"[]");
 
-document.getElementById("add").addEventListener("click",function(){
- if(!date.value||!from.value||!to.value||!activity.value.trim()){
-   alert("Bitte Datum, Von, Bis und Tätigkeit ausfüllen.");
-   return;
- }
- if(to.value<=from.value){
-   alert("Die Bis-Zeit muss nach der Von-Zeit liegen.");
-   return;
- }
- entries.push({
-   date:date.value,
-   from:from.value,
-   to:to.value,
-   activity:activity.value.trim()
- });
- render();
- activity.value="";
- msg.textContent="✓ Eintrag wurde hinzugefügt";
- msg.style.display="block";
-});
-
-function render(){
- list.innerHTML=entries.map(e =>
-   "<div class='entry'><b>"+e.date.split("-").reverse().join(".")+
-   "</b> · "+e.from+"–"+e.to+" Uhr<br>"+e.activity+"</div>"
- ).join("");
+function isoToday(){
+ const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
+ return d.toISOString().slice(0,10);
 }
+$("date").value=isoToday();
+
+function kwOf(dateString){
+ const d=new Date(dateString+"T12:00:00");
+ const day=(d.getDay()+6)%7;
+ d.setDate(d.getDate()-day+3);
+ const first=new Date(d.getFullYear(),0,4);
+ return 1+Math.round(((d-first)/86400000-first.getDay()+1)/7);
+}
+function updatePeriod(){
+ if(!$("date").value)return;
+ const d=new Date($("date").value+"T12:00:00");
+ $("period").textContent=d.toLocaleDateString("de-DE",{month:"long",year:"numeric"})+" · KW "+kwOf($("date").value);
+}
+function save(){localStorage.setItem("stunden_entries",JSON.stringify(entries))}
+function minutes(t){const [h,m]=t.split(":").map(Number);return h*60+m}
+function render(){
+ entries.sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
+ $("entries").innerHTML=entries.length?entries.map((e,i)=>{
+   const d=e.date.split("-").reverse().join(".");
+   return `<div class="entry"><div><b>${d}</b> · ${e.from}–${e.to} Uhr<br><span class="small">${escapeHtml(e.activity)} · KW ${kwOf(e.date)}</span></div><button class="red" onclick="removeEntry(${i})">Löschen</button></div>`;
+ }).join(""):"<div class='empty'>Noch keine Einträge.</div>";
+ let total=entries.reduce((s,e)=>s+minutes(e.to)-minutes(e.from),0);
+ $("total").textContent="Gesamt: "+Math.floor(total/60)+":"+String(total%60).padStart(2,"0")+" h";
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function removeEntry(i){entries.splice(i,1);save();render()}
+$("date").addEventListener("change",updatePeriod);
+$("add").addEventListener("click",()=>{
+ const d=$("date").value,f=$("from").value,t=$("to").value,a=$("activity").value.trim();
+ if(!d||!f||!t||!a){alert("Bitte Datum, Von, Bis und Tätigkeit ausfüllen.");return}
+ if(minutes(t)<=minutes(f)){alert("Die Bis-Zeit muss nach der Von-Zeit liegen.");return}
+ entries.push({date:d,from:f,to:t,activity:a});
+ save();render();$("activity").value="";
+ updatePeriod();
+});
+$("clear").addEventListener("click",()=>{
+ if(confirm("Alle Einträge wirklich löschen?")){entries=[];save();render()}
+});
+updatePeriod();render();
 </script>
 </body>
 </html>
