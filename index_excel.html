@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#007aff">
+<title>Stundennachweis</title>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f2f2f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:600px;margin:auto;padding:20px 16px 40px}
+h1{font-size:29px;margin:5px 0 2px}.period{color:#007aff;font-weight:600;font-size:17px;margin-bottom:20px}
+.card{background:#fff;border-radius:18px;padding:18px;margin:12px 0;box-shadow:0 1px 5px #00000012}
+label{display:block;font-size:13px;font-weight:600;color:#666;margin:10px 0 6px}
+input{width:100%;padding:13px;border:1px solid #d1d1d6;border-radius:11px;font-size:17px;background:#fff}
+input[type=file]{padding:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{width:100%;border:0;border-radius:12px;padding:14px;font-size:17px;font-weight:600;margin-top:14px;background:#007aff;color:#fff}
+button.gray{background:#e5e5ea;color:#111}
+button.green{background:#34c759}
+button.red{width:auto;background:#ff3b30;padding:7px 10px;font-size:13px;margin:0}
+.status{background:#f2f2f7;border-radius:12px;padding:11px;margin-top:10px;color:#666;font-size:14px}
+.entry{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #eee}
+.entry:last-child{border-bottom:0}
+.small{color:#666;font-size:14px}
+.total{font-size:18px;font-weight:700;margin-top:14px}
+.empty{color:#888;text-align:center;padding:12px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Stundennachweis</h1>
+<div class="period" id="period"></div>
+
+<div class="card">
+<label>Deine Excel-Vorlage auswählen</label>
+<input id="file" type="file" accept=".xlsx">
+<div class="status" id="fileStatus">Noch keine Excel-Datei ausgewählt.</div>
+</div>
+
+<div class="card">
+<label>Datum</label>
+<input id="date" type="date">
+<div class="row">
+<div><label>Von</label><input id="from" type="time"></div>
+<div><label>Bis</label><input id="to" type="time"></div>
+</div>
+<label>Tätigkeit</label>
+<input id="activity" placeholder="z. B. Lagerarbeiten">
+<button id="add">+ Eintrag hinzufügen</button>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">Meine Einträge</h3>
+<div id="entries"></div>
+<div class="total" id="total">Gesamt: 0:00 h</div>
+<button class="green" id="make">Excel erstellen</button>
+<button class="gray" id="clear">Liste leeren</button>
+</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let entries=JSON.parse(localStorage.getItem("stunden_entries")||"[]");
+let sourceFile=null;
+
+function isoToday(){
+ const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
+ return d.toISOString().slice(0,10);
+}
+$("date").value=isoToday();
+
+function kwOf(dateString){
+ const d=new Date(dateString+"T12:00:00");
+ const day=(d.getDay()+6)%7;
+ d.setDate(d.getDate()-day+3);
+ const first=new Date(d.getFullYear(),0,4);
+ return 1+Math.round(((d-first)/86400000-first.getDay()+1)/7);
+}
+function updatePeriod(){
+ if(!$("date").value)return;
+ const d=new Date($("date").value+"T12:00:00");
+ $("period").textContent=d.toLocaleDateString("de-DE",{month:"long",year:"numeric"})+" · KW "+kwOf($("date").value);
+}
+function save(){localStorage.setItem("stunden_entries",JSON.stringify(entries))}
+function minutes(t){const [h,m]=t.split(":").map(Number);return h*60+m}
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+
+function render(){
+ entries.sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
+ $("entries").innerHTML=entries.length?entries.map((e,i)=>{
+   const d=e.date.split("-").reverse().join(".");
+   return `<div class="entry"><div><b>${d}</b> · ${e.from}–${e.to} Uhr<br><span class="small">${escapeHtml(e.activity)} · KW ${kwOf(e.date)}</span></div><button class="red" onclick="removeEntry(${i})">Löschen</button></div>`;
+ }).join(""):"<div class='empty'>Noch keine Einträge.</div>";
+ let total=entries.reduce((s,e)=>s+minutes(e.to)-minutes(e.from),0);
+ $("total").textContent="Gesamt: "+Math.floor(total/60)+":"+String(total%60).padStart(2,"0")+" h";
+}
+function removeEntry(i){entries.splice(i,1);save();render()}
+
+$("date").addEventListener("change",updatePeriod);
+
+$("add").addEventListener("click",()=>{
+ const d=$("date").value,f=$("from").value,t=$("to").value,a=$("activity").value.trim();
+ if(!d||!f||!t||!a){alert("Bitte Datum, Von, Bis und Tätigkeit ausfüllen.");return}
+ if(minutes(t)<=minutes(f)){alert("Die Bis-Zeit muss nach der Von-Zeit liegen.");return}
+ entries.push({date:d,from:f,to:t,activity:a});
+ save();render();$("activity").value="";
+ updatePeriod();
+});
+
+$("clear").addEventListener("click",()=>{
+ if(confirm("Alle Einträge wirklich löschen?")){entries=[];save();render()}
+});
+
+$("file").addEventListener("change",async()=>{
+ sourceFile=$("file").files[0]||null;
+ if(!sourceFile){$("fileStatus").textContent="Noch keine Excel-Datei ausgewählt.";return}
+ $("fileStatus").textContent="Lese "+sourceFile.name+" …";
+ try{
+   if(typeof ExcelJS==="undefined") throw new Error("Excel-Bibliothek nicht geladen");
+   const wb=new ExcelJS.Workbook();
+   await wb.xlsx.load(await sourceFile.arrayBuffer());
+   const ws=wb.worksheets[0];
+   const detected=[];
+   // Datenzeilen der Vorlage: 8,10,12,...,28
+   for(let r=8;r<=28;r+=2){
+     const dateVal=ws.getCell(r,3).value;
+     const fromVal=ws.getCell(r,6).value;
+     const toVal=ws.getCell(r,8).value;
+     const actVal=ws.getCell(r,14).value;
+     if(dateVal && fromVal && toVal){
+       const date = excelDateToISO(dateVal);
+       const from = excelTimeToHHMM(fromVal);
+       const to = excelTimeToHHMM(toVal);
+       if(date && from && to){
+         detected.push({date,from,to,activity:typeof actVal==="string"?actVal:""});
+       }
+     }
+   }
+   if(detected.length){
+     // Vorlage ist die Ausgangslage. Bereits vorhandene Einträge werden übernommen.
+     const key=e=>e.date+"|"+e.from+"|"+e.to+"|"+e.activity;
+     const map=new Map(entries.map(e=>[key(e),e]));
+     detected.forEach(e=>map.set(key(e),e));
+     entries=[...map.values()];
+     save();render();
+   }
+   $("fileStatus").textContent=sourceFile.name+" geladen"+(detected.length?` · ${detected.length} vorhandener Eintrag übernommen.`:" · noch keine Einträge gefunden.");
+ }catch(err){
+   sourceFile=null;
+   $("fileStatus").textContent="Datei konnte nicht gelesen werden. Bitte eine .xlsx-Datei auswählen.";
+   alert("Die Excel-Datei konnte nicht gelesen werden.");
+ }
+});
+
+function excelDateToISO(v){
+ if(v instanceof Date){
+   const y=v.getFullYear(),m=String(v.getMonth()+1).padStart(2,"0"),d=String(v.getDate()).padStart(2,"0");
+   return `${y}-${m}-${d}`;
+ }
+ if(typeof v==="number"){
+   const base=new Date(Date.UTC(1899,11,30));
+   const d=new Date(base.getTime()+v*86400000);
+   return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`;
+ }
+ return "";
+}
+function excelTimeToHHMM(v){
+ if(v instanceof Date) return String(v.getHours()).padStart(2,"0")+":"+String(v.getMinutes()).padStart(2,"0");
+ if(typeof v==="number"){
+   const total=Math.round(v*24*60);
+   return String(Math.floor(total/60)%24).padStart(2,"0")+":"+String(total%60).padStart(2,"0");
+ }
+ if(typeof v==="string" && /^\d{1,2}:\d{2}/.test(v)) return v.slice(0,5);
+ return "";
+}
+
+$("make").addEventListener("click",async()=>{
+ if(!sourceFile){alert("Bitte zuerst deine aktuelle KW-Excel-Datei auswählen.");return}
+ if(!entries.length){alert("Bitte mindestens einen Eintrag hinzufügen.");return}
+ if(typeof ExcelJS==="undefined"){alert("Excel-Bibliothek konnte nicht geladen werden. Prüfe die Internetverbindung.");return}
+
+ try{
+   entries.sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
+   const firstKW=kwOf(entries[0].date);
+   const allSameKW=entries.every(e=>kwOf(e.date)===firstKW);
+   if(!allSameKW){
+     if(!confirm("Deine Liste enthält mehrere Kalenderwochen. Es wird trotzdem eine Datei mit allen Einträgen erstellt. Für jede KW ist normalerweise eine eigene Vorlage sinnvoll. Fortfahren?")) return;
+   }
+
+   const wb=new ExcelJS.Workbook();
+   await wb.xlsx.load(await sourceFile.arrayBuffer());
+   const ws=wb.worksheets[0];
+
+   // Seiteneinstellungen der Originalvorlage beibehalten bzw. sauber festlegen.
+   // Dadurch bleibt das Layout unverändert, wird aber beim Drucken/Export auf eine Seite skaliert.
+   ws.pageSetup = {
+     orientation: "landscape",
+     paperSize: 9,
+     fitToPage: true,
+     fitToWidth: 1,
+     fitToHeight: 1,
+     horizontalDpi: 300,
+     verticalDpi: 300
+   };
+   ws.pageSetup.printArea = "A1:T41";
+   ws.pageSetup.horizontalCentered = true;
+   ws.pageMargins = {
+     left: 0.25, right: 0.25,
+     top: 0.35, bottom: 0.35,
+     header: 0.1, footer: 0.1
+   };
+   ws.views = [{ state: "normal", showGridLines: false }];
+
+   // Monat und KW in der Vorlage aktualisieren.
+   const d0=new Date(entries[0].date+"T12:00:00");
+   const month=d0.toLocaleDateString("de-DE",{month:"long"});
+   for(let r=1;r<=10;r++){
+     for(let c=1;c<=ws.columnCount;c++){
+       const v=ws.getCell(r,c).value;
+       if(typeof v==="string" && v.trim().toLowerCase()==="monat:") ws.getCell(r,c+1).value=month;
+       if(typeof v==="string" && v.trim().toLowerCase()==="kw:") ws.getCell(r,c+1).value=firstKW;
+     }
+   }
+
+   const rows=[];
+   for(let r=8;r<=28;r+=2) rows.push(r);
+   if(entries.length>rows.length) throw new Error("Die Vorlage bietet nur 11 Eintragszeilen.");
+
+   // Alte Eingaben in den vorgesehenen Datenzeilen entfernen,
+   // Formeln und Formatierungen bleiben erhalten.
+   rows.forEach(r=>{
+     ws.getCell(r,1).value=null;
+     ws.getCell(r,3).value=null;
+     ws.getCell(r,6).value=null;
+     ws.getCell(r,8).value=null;
+     ws.getCell(r,14).value=null;
+   });
+
+   entries.forEach((e,i)=>{
+     const r=rows[i];
+     const date=new Date(e.date+"T00:00:00");
+     const [fh,fm]=e.from.split(":").map(Number);
+     const [th,tm]=e.to.split(":").map(Number);
+
+     // Die Vorlage nutzt A/B und C:E als Datum sowie F:G und H:I für Zeiten.
+     ws.getCell(r,1).value=date;
+     ws.getCell(r,3).value=date;
+     ws.getCell(r,6).value=new Date(1899,11,30,fh,fm,0);
+     ws.getCell(r,8).value=new Date(1899,11,30,th,tm,0);
+     ws.getCell(r,14).value=e.activity;
+
+     ws.getCell(r,3).numFmt="dd.mm.yyyy";
+     ws.getCell(r,6).numFmt="hh:mm";
+     ws.getCell(r,8).numFmt="hh:mm";
+   });
+
+   // Dateiname automatisch aus Kalenderwoche.
+   const outName="KW"+firstKW+".xlsx";
+   const buffer=await wb.xlsx.writeBuffer();
+   const blob=new Blob([buffer],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+   const url=URL.createObjectURL(blob);
+   const a=document.createElement("a");
+   a.href=url;a.download=outName;document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),3000);
+   alert(outName+" wurde erstellt.");
+ }catch(err){
+   alert("Excel konnte nicht erstellt werden: "+err.message);
+ }
+});
+
+updatePeriod();render();
+</script>
+</body>
+</html>
