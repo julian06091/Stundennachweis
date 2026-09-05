@@ -1,0 +1,180 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundennachweis</title><style>*{box-sizing:border-box}body{margin:0;background:#f2f2f7;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:600px;margin:auto;padding:20px 16px 40px}h1{font-size:29px;margin:5px 0 2px}.period{color:#007aff;font-weight:600;font-size:17px;margin-bottom:20px}.card{background:#fff;border-radius:18px;padding:18px;margin:12px 0;box-shadow:0 1px 5px #0001}label{display:block;font-size:13px;font-weight:600;color:#666;margin:10px 0 6px}input{width:100%;padding:13px;border:1px solid #d1d1d6;border-radius:11px;font-size:17px;background:#fff}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}button{width:100%;border:0;border-radius:12px;padding:14px;font-size:17px;font-weight:600;margin-top:14px;background:#007aff;color:#fff}button.gray{background:#e5e5ea;color:#111}.entry{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #eee}.small{color:#666;font-size:14px}button.red{width:auto;background:#ff3b30;padding:7px 10px;font-size:13px;margin:0}.green{background:#34c759}.ok{color:#16883a;font-weight:600}</style></head><body><main><h1>Stundennachweis</h1><div class="period" id="period">Noch kein Datum</div><div class="card"><label>Excel-Vorlage</label><input id="file" type="file" accept=".xlsx"><div id="fileinfo" class="small" style="margin-top:8px">Bitte die funktionierende Excel-Vorlage auswählen.</div></div><div class="card"><label>Datum</label><input id="date" type="date"><div class="row"><div><label>Von</label><input id="from" type="time"></div><div><label>Bis</label><input id="to" type="time"></div></div><label>Tätigkeit</label><input id="activity" placeholder="z. B. Lagerarbeiten"><button id="add">+ Eintrag hinzufügen</button></div><div class="card"><div id="list"><div class="small">Noch keine Einträge.</div></div><button id="make" class="green">KW-Datei erstellen</button><button id="clear" class="gray">Liste leeren</button></div></main><script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script><script>
+const $=id=>document.getElementById(id);
+let sourceFile=null,entries=[];
+
+function mins(s){const [h,m]=s.split(':').map(Number);return h*60+m}
+function kwOf(s){
+  const d=new Date(s+'T12:00:00'), day=(d.getDay()+6)%7;
+  d.setDate(d.getDate()+3-day);
+  const y=d.getFullYear(), first=new Date(y,0,4), fd=(first.getDay()+6)%7;
+  return 1+Math.floor(((d-first)/86400000+fd)/7)
+}
+function calc(e){
+  let raw=(mins(e.to)-mins(e.from))/60;
+  if(raw<0)raw+=24;
+  const pause=raw>=6?1:raw>=4.5?.5:0;
+  return {raw,total:raw-pause,euro:(raw-pause)*14,pause};
+}
+function updatePeriod(){
+  const d=$("date").value;
+  $("period").textContent=d?new Date(d+'T12:00:00').toLocaleDateString('de-DE',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'})+' · KW '+kwOf(d):'Noch kein Datum';
+}
+function render(){
+  if(!entries.length){$("list").innerHTML='<div class="small">Noch keine Einträge.</div>';return}
+  entries.sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
+  $("list").innerHTML=entries.map((e,i)=>{
+    const c=calc(e);
+    return `<div class="entry"><div><b>${new Date(e.date+'T12:00:00').toLocaleDateString('de-DE')}</b> · ${e.from}–${e.to} Uhr<br><span class="small">${e.activity} · KW ${kwOf(e.date)} · ${c.total.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} h · ${c.euro.toLocaleString('de-DE',{minimumFractionDigits:2})} €</span></div><button class="red" onclick="delEntry(${i})">Löschen</button></div>`
+  }).join('')
+}
+function delEntry(i){entries.splice(i,1);render()}
+
+$("file").addEventListener('change',e=>{
+  sourceFile=e.target.files[0]||null;
+  $("fileinfo").innerHTML=sourceFile?'<span class="ok">✓ '+sourceFile.name+' ausgewählt</span>':'Bitte die Excel-Vorlage auswählen.'
+});
+$("date").addEventListener('change',updatePeriod);
+$("add").addEventListener('click',()=>{
+  const d=$("date").value,f=$("from").value,t=$("to").value,a=$("activity").value.trim();
+  if(!d||!f||!t||!a)return alert('Bitte Datum, Von, Bis und Tätigkeit ausfüllen.');
+  if(mins(t)<=mins(f))return alert('Die Bis-Zeit muss nach der Von-Zeit liegen.');
+  if(entries.length&&kwOf(d)!==kwOf(entries[0].date))return alert('Bitte nur Einträge derselben Kalenderwoche eingeben.');
+  entries.push({date:d,from:f,to:t,activity:a});
+  $("activity").value='';render();updatePeriod();
+});
+$("clear").addEventListener('click',()=>{if(confirm('Alle Einträge wirklich löschen?')){entries=[];render()}});
+
+function excelDate(s){
+  const [y,m,d]=s.split('-').map(Number);
+  return Math.round((Date.UTC(y,m-1,d)-Date.UTC(1899,11,30))/86400000);
+}
+function excelTime(s){return mins(s)/1440}
+function escXml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+
+/* Replace only the CONTENT of an existing cell. We never parse or serialize XML.
+   This preserves the original workbook XML byte-for-byte except for the cells we edit. */
+function setCellRaw(xml,ref,value,kind){
+  const safe=ref.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const re=new RegExp('(<c\\b[^>]*\\br="'+safe+'"[^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+  const m=re.exec(xml);
+  if(!m) throw new Error('Zelle '+ref+' wurde in der Vorlage nicht gefunden.');
+  let tag=m[1].replace(/\s+t="[^"]*"/g,'');
+  let content;
+  if(kind==='inline'){
+    tag+=' t="inlineStr"';
+    content='<is><t>'+escXml(value)+'</t></is>';
+  }else{
+    content='<v>'+String(value)+'</v>';
+  }
+  return xml.slice(0,m.index)+tag+'>'+content+'</c>'+xml.slice(m.index+m[0].length);
+}
+function setExistingCell(xml,ref,value,kind){
+  return setCellRaw(xml,ref,value,kind);
+}
+
+function findEvenRows(xml){
+  const out=[];
+  const re=/<row\b[^>]*\br="(\d+)"[^>]*>[\s\S]*?<\/row>/g;
+  let m;
+  while((m=re.exec(xml))){
+    const n=Number(m[1]);
+    if(n>=8&&n<=34&&n%2===0)out.push(n);
+  }
+  return out;
+}
+
+function setFormulaCache(xml,ref,value){
+  const re=new RegExp('(<c\\b[^>]*\\br="'+ref+'"[^>]*>[\\s\\S]*?<f\\b[^>]*>)[\\s\\S]*?(</f>)([\\s\\S]*?)(<v>)[\\s\\S]*?(</v>)');
+  const m=re.exec(xml);
+  if(!m)return xml; // cache is optional; Excel recalculates from formulas.
+  return xml.slice(0,m.index)+m[1]+m[0].slice(m[1].length,m[1].length+(m[2].length))+m[2]+m[3]+m[4]+String(value)+m[5]+xml.slice(m.index+m[0].length);
+}
+
+function replaceFormulaCache(xml,ref,value){
+  const re=new RegExp('(<c\\b[^>]*\\br="'+ref+'"[^>]*>[\\s\\S]*?<f\\b[^>]*>[\\s\\S]*?</f>\\s*<v>)[\\s\\S]*?(</v>)');
+  return xml.replace(re,'$1'+String(value)+'$2');
+}
+
+$("make").addEventListener('click',async()=>{
+  if(!sourceFile)return alert('Bitte zuerst die Excel-Vorlage auswählen.');
+  if(!entries.length)return alert('Bitte mindestens einen Eintrag hinzufügen.');
+  if(typeof JSZip==='undefined')return alert('Excel-Bibliothek nicht geladen. Seite neu laden.');
+
+  try{
+    const zip=await JSZip.loadAsync(await sourceFile.arrayBuffer());
+    const sf=zip.file('xl/worksheets/sheet1.xml');
+    if(!sf)throw new Error('Die Excel-Vorlage enthält kein Arbeitsblatt.');
+
+    let xml=await sf.async('string');
+    const rows=findEvenRows(xml);
+    if(entries.length>rows.length)throw new Error('Die Vorlage hat nur '+rows.length+' Eintragszeilen.');
+
+    entries.sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
+
+    // Do not rewrite empty cells. The clean template is already blank.
+    // This keeps the original workbook structure as untouched as possible.
+    // Write entries.
+    for(let i=0;i<entries.length;i++){
+      const e=entries[i], rn=rows[i], c=calc(e);
+      xml=setExistingCell(xml,'C'+rn,excelDate(e.date),'num');
+      xml=setExistingCell(xml,'F'+rn,excelTime(e.from),'num');
+      xml=setExistingCell(xml,'H'+rn,excelTime(e.to),'num');
+      xml=setExistingCell(xml,'N'+rn,e.activity,'inline');
+      xml=setExistingCell(xml,'L'+rn,14,'num');
+
+      // Update cached values only; leave every formula itself untouched.
+      xml=replaceFormulaCache(xml,'A'+rn,excelDate(e.date));
+      xml=replaceFormulaCache(xml,'I'+rn,c.raw);
+      xml=replaceFormulaCache(xml,'J'+rn,c.pause);
+      xml=replaceFormulaCache(xml,'K'+rn,c.total);
+      xml=replaceFormulaCache(xml,'M'+rn,c.euro);
+    }
+
+    // Update month and KW without changing workbook structure.
+    const first=entries[0].date;
+    const month=new Date(first+'T12:00:00').toLocaleDateString('de-DE',{month:'long'});
+    xml=setExistingCell(xml,'Q4',month,'inline');
+    xml=setExistingCell(xml,'S4',kwOf(first),'num');
+
+    zip.file('xl/worksheets/sheet1.xml',xml);
+
+    // The template contains a calculation chain. After changing input values
+    // Excel may consider that chain stale and show a repair dialog. Remove it;
+    // workbook formulas are kept and Excel is instructed to recalculate them.
+    zip.remove('xl/calcChain.xml');
+    const relFile=zip.file('xl/_rels/workbook.xml.rels');
+    if(relFile){
+      let rel=await relFile.async('string');
+      rel=rel.replace(/<Relationship\b[^>]*Type=\"http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/calcChain\"[^>]*\/>/g,'');
+      zip.file('xl/_rels/workbook.xml.rels',rel);
+    }
+    const ctFile=zip.file('[Content_Types].xml');
+    if(ctFile){
+      let ct=await ctFile.async('string');
+      ct=ct.replace(/<Override\b[^>]*PartName=\"\/xl\/calcChain\.xml\"[^>]*\/>/g,'');
+      zip.file('[Content_Types].xml',ct);
+    }
+
+    const bytes=await zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
+    const filename='KW'+String(kwOf(first)).padStart(2,'0')+'.xlsx';
+    const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const file=new File([blob],filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:filename});
+    }else{
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;a.download=filename;
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),10000);
+    }
+  }catch(err){
+    console.error(err);
+    alert('Fehler beim Erstellen: '+(err.message||err));
+  }
+});
+updatePeriod();render();
+</script></body></html>
